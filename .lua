@@ -1,5 +1,5 @@
 -- =====================================================================
--- MEGA HUB UNIVERSAL DE TYCOONS (BY JACOBOEU8) - SISTEMA DE KEYS COMPLETO
+-- MEGA HUB UNIVERSAL DE TYCOONS (BY JACOBOEU8) - SCRIPT COMPLETO CON PLATOBOOST
 -- =====================================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -15,12 +15,12 @@ local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 local playerGui = player:WaitForChild("PlayerGui")
 
--- CONFIGURACIÓN DE LINKS Y ARCHIVOS
-local keysUrl = "https://raw.githubusercontent.com/jacobllano2004-svg/Script-tycoon-universal/refs/heads/main/keys.txt"
-local keyLinkvertiseUrl = "https://linkvertise.com/tu_enlace_aqui" -- Cambia esto por tu link
+-- CONFIGURACIÓN DE PLATOBOOST Y ARCHIVOS
+local SERVICE_ID = "34280"
+local keyLinkvertiseUrl = "https://platoboost.com/f/" .. SERVICE_ID
 local ownerKeyFile = "MegaHub_OwnerKey.txt"
 
--- CLAVE MAESTRA PERMANENTE (TU KEY SECRETA)
+-- CLAVE MAESTRA PERMANENTE (TU KEY SECRETA DE OWNER)
 local _mK = "JACOBO_OWNER_MASTER_2026_99"
 
 -- Limpiar GUIs antiguas si existen
@@ -1373,15 +1373,14 @@ local function loadMainHubWithAnimation()
 end
 
 -- =====================================================================
--- COMPROBACIÓN AUTOMÁTICA DE KEY GUARDA / SESIÓN
+-- COMPROBACIÓN AUTOMÁTICA DE KEY (PLATOBOOST API & MASTER KEY)
 -- =====================================================================
--- 1. Si ya se verificó en la sesión activa:
 if getgenv().KeyVerified == true then
 	loadMainHubWithAnimation()
 	return
 end
 
--- 2. Si guardaste tu Clave Maestra en tu dispositivo anteriormente:
+-- Comprobar si la Master Key de Owner está guardada localmente
 if isfile and isfile(ownerKeyFile) then
 	local savedKey = readfile(ownerKeyFile)
 	if savedKey and string.gsub(savedKey, "%s+", "") == _mK then
@@ -1392,7 +1391,7 @@ if isfile and isfile(ownerKeyFile) then
 end
 
 -- =====================================================================
--- UI DEL SISTEMA DE KEYS (SI NO HAY KEY GUARDADA)
+-- UI DEL SISTEMA DE KEYS (PLATOBOOST INTEGRADO)
 -- =====================================================================
 local keyScreenGui = Instance.new("ScreenGui")
 keyScreenGui.Name = "MegaHubKeySystem"
@@ -1418,7 +1417,7 @@ local keyTitle = Instance.new("TextLabel")
 keyTitle.Size = UDim2.new(1, 0, 0, 40)
 keyTitle.Position = UDim2.new(0, 0, 0, 10)
 keyTitle.BackgroundTransparency = 1
-keyTitle.Text = "SISTEMA DE KEYS"
+keyTitle.Text = "SISTEMA DE KEYS (PLATOBOOST)"
 keyTitle.TextColor3 = Color3.fromRGB(0, 200, 255)
 keyTitle.Font = Enum.Font.SourceSansBold
 keyTitle.TextSize = 18
@@ -1491,7 +1490,7 @@ statusLabel.Parent = keyFrame
 getKeyBtn.MouseButton1Click:Connect(function()
 	if setclipboard then
 		setclipboard(keyLinkvertiseUrl)
-		statusLabel.Text = "¡Enlace copiado al portapapeles!"
+		statusLabel.Text = "¡Enlace de Platoboost copiado!"
 		statusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
 	else
 		statusLabel.Text = "Copia este link: " .. keyLinkvertiseUrl
@@ -1510,7 +1509,7 @@ verifyBtn.MouseButton1Click:Connect(function()
 	statusLabel.Text = "Verificando..."
 	statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
 
-	-- 1. COMPROBAR CLAVE MAESTRA (SI ES TUYA, GUARDA EL ARCHIVO Y PASA DIRECTO)
+	-- 1. COMPROBAR CLAVE MAESTRA (BYPASS DE OWNER)
 	if inputKey == _mK then
 		getgenv().KeyVerified = true
 		if writefile then writefile(ownerKeyFile, _mK) end
@@ -1530,23 +1529,26 @@ verifyBtn.MouseButton1Click:Connect(function()
 		return
 	end
 
-	-- 2. COMPROBAR KEYS PÚBLICAS EN GITHUB (PARA USUARIOS NORMALES)
+	-- 2. COMPROBAR KEY A TRAVÉS DE LA API OFICIAL DE PLATOBOOST
 	task.spawn(function()
-		local success, result = pcall(function()
-			return game:HttpGet(keysUrl)
+		local requestFunc = (syn and syn.request) or (http and http.request) or http_request or fluxus.request or request
+		if not requestFunc then
+			statusLabel.Text = "Tu ejecutor no soporta peticiones HTTP."
+			statusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+			return
+		end
+
+		local url = string.format("https://api-gateway.platoboost.com/v1/public/whitelist/%s?identifier=%s&key=%s", SERVICE_ID, tostring(player.UserId), inputKey)
+		local success, response = pcall(function()
+			return requestFunc({
+				Url = url,
+				Method = "GET"
+			})
 		end)
 
-		if success and result then
-			local validKey = false
-			for key in string.gmatch(result, "[^\r\n]+") do
-				local cleanKey = string.gsub(key, "%s+", "")
-				if cleanKey ~= "" and cleanKey == inputKey then
-					validKey = true
-					break
-				end
-			end
-
-			if validKey then
+		if success and response and response.StatusCode == 200 then
+			local data = HttpService:JSONDecode(response.Body)
+			if data and data.valid == true then
 				getgenv().KeyVerified = true
 				statusLabel.Text = "¡Key Correcta! Cargando..."
 				statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
@@ -1568,7 +1570,7 @@ verifyBtn.MouseButton1Click:Connect(function()
 				statusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
 			end
 		else
-			statusLabel.Text = "Error al conectar con el servidor"
+			statusLabel.Text = "Error al conectar con Platoboost"
 			statusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
 		end
 	end)
