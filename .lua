@@ -1,5 +1,5 @@
 -- =====================================================================
--- MEGA HUB UNIVERSAL DE TYCOONS (BY JACOBOEU8) - SCRIPT COMPLETO CON PLATOBOOST
+-- MEGA HUB UNIVERSAL DE TYCOONS (BY JACOBOEU8) - SCRIPT COMPLETO
 -- =====================================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -20,8 +20,18 @@ local SERVICE_ID = "34280"
 local keyLinkvertiseUrl = "https://platoboost.com/f/" .. SERVICE_ID
 local ownerKeyFile = "MegaHub_OwnerKey.txt"
 
--- CLAVE MAESTRA PERMANENTE (TU KEY SECRETA DE OWNER)
+-- CLAVE MAESTRA PERMANENTE (SOLO FUNCIONA SI ERES TÚ)
 local _mK = "JACOBO_OWNER_MASTER_2026_99"
+
+-- CUENTAS PERMITIDAS PARA BYPASS DE OWNER
+local allowedOwners = {
+	["jacoboeu8"] = true,
+	["jacoboeu4"] = true
+}
+
+local function isCurrentPlayerOwner()
+	return allowedOwners[string.lower(player.Name)] == true
+end
 
 -- Limpiar GUIs antiguas si existen
 if playerGui:FindFirstChild("MegaHubKeySystem") then
@@ -1373,15 +1383,15 @@ local function loadMainHubWithAnimation()
 end
 
 -- =====================================================================
--- COMPROBACIÓN AUTOMÁTICA DE KEY (PLATOBOOST API & MASTER KEY)
+-- COMPROBACIÓN AUTOMÁTICA DE KEY (SOLO PARA JACOBOEU8 Y JACOBOEU4)
 -- =====================================================================
 if getgenv().KeyVerified == true then
 	loadMainHubWithAnimation()
 	return
 end
 
--- Comprobar si la Master Key de Owner está guardada localmente
-if isfile and isfile(ownerKeyFile) then
+-- Si eres uno de los 2 Owners y tienes la Master Key guardada localmente
+if isCurrentPlayerOwner() and isfile and isfile(ownerKeyFile) then
 	local savedKey = readfile(ownerKeyFile)
 	if savedKey and string.gsub(savedKey, "%s+", "") == _mK then
 		getgenv().KeyVerified = true
@@ -1391,7 +1401,7 @@ if isfile and isfile(ownerKeyFile) then
 end
 
 -- =====================================================================
--- UI DEL SISTEMA DE KEYS (PLATOBOOST INTEGRADO)
+-- UI DEL SISTEMA DE KEYS (PLATOBOOST CON VALIDACIÓN SEGURA)
 -- =====================================================================
 local keyScreenGui = Instance.new("ScreenGui")
 keyScreenGui.Name = "MegaHubKeySystem"
@@ -1509,27 +1519,33 @@ verifyBtn.MouseButton1Click:Connect(function()
 	statusLabel.Text = "Verificando..."
 	statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
 
-	-- 1. COMPROBAR CLAVE MAESTRA (BYPASS DE OWNER)
+	-- 1. INTENTO DE USAR CLAVE MAESTRA (SOLO VÁLIDA PARA JACOBOEU8 Y JACOBOEU4)
 	if inputKey == _mK then
-		getgenv().KeyVerified = true
-		if writefile then writefile(ownerKeyFile, _mK) end
-		statusLabel.Text = "¡Owner Verificado! Guardado permanente."
-		statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
-		task.wait(0.6)
-		
-		local tweenOut = TweenService:Create(keyFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-			Size = UDim2.new(0, 0, 0, 0),
-			Position = UDim2.new(0.5, 0, 0.5, 0)
-		})
-		tweenOut:Play()
-		tweenOut.Completed:Connect(function()
-			keyScreenGui:Destroy()
-			loadMainHubWithAnimation()
-		end)
-		return
+		if isCurrentPlayerOwner() then
+			getgenv().KeyVerified = true
+			if writefile then writefile(ownerKeyFile, _mK) end
+			statusLabel.Text = "¡Owner Verificado! Acceso permanente."
+			statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+			task.wait(0.6)
+			
+			local tweenOut = TweenService:Create(keyFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+				Size = UDim2.new(0, 0, 0, 0),
+				Position = UDim2.new(0.5, 0, 0.5, 0)
+			})
+			tweenOut:Play()
+			tweenOut.Completed:Connect(function()
+				keyScreenGui:Destroy()
+				loadMainHubWithAnimation()
+			end)
+			return
+		else
+			statusLabel.Text = "Clave invalida para esta cuenta."
+			statusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+			return
+		end
 	end
 
-	-- 2. COMPROBAR KEY A TRAVÉS DE LA API OFICIAL DE PLATOBOOST
+	-- 2. COMPROBAR KEY A TRAVÉS DE LA API DE PLATOBOOST (PARA TODOS LOS DEMÁS)
 	task.spawn(function()
 		local requestFunc = (syn and syn.request) or (http and http.request) or http_request or fluxus.request or request
 		if not requestFunc then
