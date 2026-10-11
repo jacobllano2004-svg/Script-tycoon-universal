@@ -1,5 +1,5 @@
 -- =====================================================================
--- MEGA HUB UNIVERSAL DE TYCOONS (BY JACOBOEU8) - V3.9.2 ULTRA DEFINITIVE
+-- MEGA HUB UNIVERSAL DE TYCOONS (BY JACOBOEU8) - V4.4 ULTIMATE CROWN EDITION
 -- =====================================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -14,8 +14,12 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local function getCurrentCamera()
+	return workspace.CurrentCamera or workspace:FindFirstChildOfClass("Camera")
+end
+
 -- =====================================================================
--- 1. SISTEMA DE LIMPIEZA TOTAL IDEMPOTENTE (V3.9.2)
+-- 1. SISTEMA DE LIMPIEZA TOTAL IDEMPOTENTE Y BLINDADO (V4.4)
 -- =====================================================================
 if type(getgenv) == "function" and getgenv().MegaHubCleaner then
 	pcall(function()
@@ -27,10 +31,9 @@ local activeConnections = {}
 local activeDrawings = {}
 local espChamsConnections = {}
 local espNameConnections = {}
-local playerChamsConnections = {} -- [userId] = { conns... }
-local playerNamesConnections = {} -- [userId] = { conns... }
+local playerChamsConnections = {}
+local playerNamesConnections = {}
 
--- Iluminación original protegida por sesión
 local initialOriginalLighting = {
 	Brightness = Lighting.Brightness,
 	ClockTime = Lighting.ClockTime,
@@ -43,9 +46,9 @@ local initialOriginalLighting = {
 local cleanupState = {
 	originalLighting = initialOriginalLighting,
 	modifiedLightingProps = {},
-	characterCollisionStates = {}, -- [charInstance] = { [part] = originalCanCollide }
-	autoCollectToken = 0,
+	characterCollisionStates = {},
 	respawnToken = 0,
+	lastTempPos = nil, -- Resguardo preventivo de posición para cierre en pleno collect
 }
 
 local function registerConnection(conn)
@@ -94,19 +97,21 @@ local function cleanPlayerNamesConns(userId)
 	end
 end
 
-local function removeAllESPObjectsInWorld()
+local function removeAllHubESPObjects()
 	for _, p in pairs(Players:GetPlayers()) do
 		if p.Character then
 			local h = p.Character:FindFirstChild("ESPHighlight")
-			if h then h:Destroy() end
+			if h and h:GetAttribute("HubOwner") == "MegaHub" then h:Destroy() end
 			local t = p.Character:FindFirstChild("ESPNameTag")
-			if t then t:Destroy() end
+			if t and t:GetAttribute("HubOwner") == "MegaHub" then t:Destroy() end
 		end
 	end
 end
 
 local function restoreCharacterStates(char)
-	if char and cleanupState.characterCollisionStates[char] then
+	if not char then return end
+	
+	if cleanupState.characterCollisionStates[char] then
 		for part, originalState in pairs(cleanupState.characterCollisionStates[char]) do
 			if part and part.Parent then
 				pcall(function() part.CanCollide = originalState end)
@@ -115,22 +120,21 @@ local function restoreCharacterStates(char)
 		cleanupState.characterCollisionStates[char] = nil
 	end
 
-	if char then
-		local hum = char:FindFirstChildOfClass("Humanoid")
-		if hum then
-			if hum:GetAttribute("OriginalPlatformStand") ~= nil then
-				pcall(function() hum.PlatformStand = hum:GetAttribute("OriginalPlatformStand") end)
-				hum:SetAttribute("OriginalPlatformStand", nil)
-			end
-			if hum:GetAttribute("OriginalWalkSpeed") ~= nil then
-				pcall(function() hum.WalkSpeed = hum:GetAttribute("OriginalWalkSpeed") end)
-				hum:SetAttribute("OriginalWalkSpeed", nil)
-			end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		if hum:GetAttribute("OriginalPlatformStand") ~= nil then
+			pcall(function() hum.PlatformStand = hum:GetAttribute("OriginalPlatformStand") end)
+			hum:SetAttribute("OriginalPlatformStand", nil)
 		end
-		for _, obj in ipairs(char:GetDescendants()) do
-			if obj.Name == "FlyBodyVelocity" or obj.Name == "FlyBodyGyro" then
-				pcall(function() obj:Destroy() end)
-			end
+		if hum:GetAttribute("OriginalWalkSpeed") ~= nil then
+			pcall(function() hum.WalkSpeed = hum:GetAttribute("OriginalWalkSpeed") end)
+			hum:SetAttribute("OriginalWalkSpeed", nil)
+		end
+	end
+	
+	for _, obj in ipairs(char:GetDescendants()) do
+		if obj.Name == "FlyBodyVelocity" or obj.Name == "FlyBodyGyro" then
+			pcall(function() obj:Destroy() end)
 		end
 	end
 end
@@ -145,6 +149,7 @@ end
 -- Declaraciones globales
 local autoCollectActive, mainNoclipActive, fullbrightActive, flyActive, infJumpActive
 local collectButton, noclipMainBtn, fullbrightBtn, flyBtn, infJumpBtn, toggleButton, statsWidget
+local mainFrame
 local noclipConnection = nil
 local flyConnection = nil
 local infJumpConnection = nil
@@ -152,7 +157,14 @@ local noclipOwners = {}
 
 if type(getgenv) == "function" then
 	getgenv().MegaHubCleaner = function()
-		cleanupState.autoCollectToken = cleanupState.autoCollectToken + 1
+		-- Resguardo de emergencia: si el hub se cierra mientras AutoCollect estaba en curso, devolvemos al personaje inmediatamente
+		if autoCollectActive and cleanupState.lastTempPos then
+			pcall(function()
+				local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+				if hrp then hrp.CFrame = cleanupState.lastTempPos end
+			end)
+		end
+
 		cleanupState.respawnToken = cleanupState.respawnToken + 1
 		
 		autoCollectActive = false
@@ -177,13 +189,16 @@ if type(getgenv) == "function" then
 
 		cleanChamsConnections()
 		cleanNameConnections()
-		removeAllESPObjectsInWorld()
+		removeAllHubESPObjects()
 
 		for _, line in pairs(activeDrawings) do
 			pcall(function() line:Remove() end)
 		end
 		table.clear(activeDrawings)
 
+		if player.Character then
+			restoreCharacterStates(player.Character)
+		end
 		for charInstance, _ in pairs(cleanupState.characterCollisionStates) do
 			restoreCharacterStates(charInstance)
 		end
@@ -209,7 +224,7 @@ if type(getgenv) == "function" then
 end
 
 -- =====================================================================
--- 2. VERIFICACIÓN DE CAPACIDADES Y TEMAS (LOCAL SEGURO)
+-- 2. CAPACIDADES Y TRADUCCIONES V4.4
 -- =====================================================================
 local envFS = {
 	hasWrite = type(writefile) == "function",
@@ -225,7 +240,7 @@ local configFileName = "MegaHubConfig_" .. player.UserId .. ".json"
 
 local translations = {
 	EN = {
-		Title = "Mega Hub Universal De Tycoons (by jacoboeu8)",
+		Title = "Mega Hub Universal De Tycoons (by jacoboeu8) - V4.4",
 		TabMenu = "Menu", TabMain = "Main", TabESP = "ESP", TabTycoon = "Tycoon", TabSettings = "Settings",
 		Welcome = "Welcome, ", Executor = "Executor: ", GameTitle = "Game: Loading...",
 		FeatList = "• Main: Noclip, Fly, InfJump, TP Player\n• ESP: Blue Body, Names/Dist, Tracers\n• Tycoon: TP Base, Auto Collect\n• Settings: Languages, Themes, UI Lock, Config",
@@ -239,7 +254,7 @@ local translations = {
 		NoFS = "File system unsupported!", NoFile = "Config file not found!", CorruptJSON = "Config file corrupted!", TargetNotFound = "Target player or root part missing!", ConfigSavedMsg = "Config Saved!", ConfigLoadedMsg = "Config Loaded!", SaveFailedMsg = "Failed to save config!"
 	},
 	ES = {
-		Title = "Mega Hub Universal De Tycoons (by jacoboeu8)",
+		Title = "Mega Hub Universal De Tycoons (by jacoboeu8) - V4.4",
 		TabMenu = "Menú", TabMain = "Principal", TabESP = "ESP", TabTycoon = "Tycoon", TabSettings = "Ajustes",
 		Welcome = "Bienvenido, ", Executor = "Ejecutor: ", GameTitle = "Juego: Cargando...",
 		FeatList = "• Principal: Noclip, Fly, Salto Inf, TP Jugador\n• ESP: Cuerpo Azul, Nombres/Dist, Líneas\n• Tycoon: TP Base, Auto Recoger\n• Ajustes: Idiomas, Temas, Fijar UI, Config",
@@ -253,7 +268,7 @@ local translations = {
 		NoFS = "¡Sistema de archivos no compatible!", NoFile = "¡Archivo de configuración no encontrado!", CorruptJSON = "¡Archivo de configuración corrupto!", TargetNotFound = "¡Jugador u objetivo no encontrado!", ConfigSavedMsg = "¡Configuración Guardada!", ConfigLoadedMsg = "¡Configuración Cargada!", SaveFailedMsg = "¡Error al guardar configuración!"
 	},
 	PT = {
-		Title = "Mega Hub Universal De Tycoons (by jacoboeu8)",
+		Title = "Mega Hub Universal De Tycoons (by jacoboeu8) - V4.4",
 		TabMenu = "Menu", TabMain = "Principal", TabESP = "ESP", TabTycoon = "Tycoon", TabSettings = "Configurações",
 		Welcome = "Bem-vindo, ", Executor = "Executor: ", GameTitle = "Jogo: Carregando...",
 		FeatList = "• Principal: Noclip, Fly, Pulo Inf, TP Jogador\n• ESP: Corpo Azul, Nomes/Dist, Linhas\n• Tycoon: TP Base, Auto Coletar\n• Configurações: Idiomas, Temas, Travar UI, Config",
@@ -267,7 +282,7 @@ local translations = {
 		NoFS = "Sistema de arquivos não suportado!", NoFile = "Arquivo de configuração não encontrado!", CorruptJSON = "Arquivo de configuração corrompido!", TargetNotFound = "Jogador alvo não encontrado!", ConfigSavedMsg = "Configuração Salva!", ConfigLoadedMsg = "Configuração Carregada!", SaveFailedMsg = "Erro ao salvar!"
 	},
 	FR = {
-		Title = "Mega Hub Universal De Tycoons (by jacoboeu8)",
+		Title = "Mega Hub Universal De Tycoons (by jacoboeu8) - V4.4",
 		TabMenu = "Menu", TabMain = "Principal", TabESP = "ESP", TabTycoon = "Tycoon", TabSettings = "Paramètres",
 		Welcome = "Bienvenue, ", Executor = "Exécuteur: ", GameTitle = "Jeu: Chargement...",
 		FeatList = "• Principal: Noclip, Fly, Saut Inf, TP Joueur\n• ESP: Corps Bleu, Noms/Dist, Lignes\n• Tycoon: TP Base, Auto Collecte\n• Paramètres: Langues, Thèmes, Verrouiller UI, Config",
@@ -281,7 +296,7 @@ local translations = {
 		NoFS = "Système de fichiers non supporté!", NoFile = "Fichier de configuration introuvable!", CorruptJSON = "Fichier de configuration corrompu!", TargetNotFound = "Cible introuvable!", ConfigSavedMsg = "Configuration Sauvegardée!", ConfigLoadedMsg = "Configuration Chargée!", SaveFailedMsg = "Erreur de sauvegarde!"
 	},
 	DE = {
-		Title = "Mega Hub Universal De Tycoons (by jacoboeu8)",
+		Title = "Mega Hub Universal De Tycoons (by jacoboeu8) - V4.4",
 		TabMenu = "Menü", TabMain = "Haupt", TabESP = "ESP", TabTycoon = "Tycoon", TabSettings = "Einstellungen",
 		Welcome = "Willkommen, ", Executor = "Executor: ", GameTitle = "Spiel: Lädt...",
 		FeatList = "• Haupt: Noclip, Fly, Inf Sprung, TP Spieler\n• ESP: Blauer Körper, Namen/Dist, Linien\n• Tycoon: TP Basis, Auto Einsammeln\n• Einstellungen: Sprachen, Themen, UI Sperren, Config",
@@ -340,7 +355,7 @@ end
 local saveConfig, loadConfig
 
 -- =====================================================================
--- 3. NOCLIP Y PLATFORMSTAND SEGURO
+-- 3. NOCLIP Y RESTAURACIÓN SEGURA
 -- =====================================================================
 local function saveOriginalCollisions(char)
 	if not char then return end
@@ -457,7 +472,7 @@ local function toggleFly(state)
 		end
 		
 		flyConnection = RunService.RenderStepped:Connect(function()
-			local currentCamera = workspace.CurrentCamera
+			local currentCamera = getCurrentCamera()
 			local currentChar = player.Character
 			local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
 			local currentHum = currentChar and currentChar:FindFirstChildOfClass("Humanoid")
@@ -498,16 +513,16 @@ local function toggleFly(state)
 end
 
 -- =====================================================================
--- 4. AUTO-COLLECT ROBUSTO ATÓMICO (AC-01 A AC-04)
+-- 4. AUTO-COLLECT BLINDADO CON TOKENS ATÓMICOS ESTRICTOS (V4.4)
 -- =====================================================================
 local activeCollectSession = 0
 
-local function performCollect(token, respawnToken)
+local function performCollect(mySession)
 	local char = player.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	
 	local attempts = 0
-	while not hrp and autoCollectActive and token == activeCollectSession and respawnToken == cleanupState.respawnToken and attempts < 15 do
+	while not hrp and autoCollectActive and mySession == activeCollectSession and attempts < 15 do
 		task.wait(0.2)
 		char = player.Character
 		hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -515,61 +530,52 @@ local function performCollect(token, respawnToken)
 	end
 
 	if not autoCollectActive or not hrp or not collectorPosition then return false end
-	if token ~= activeCollectSession or respawnToken ~= cleanupState.respawnToken then return false end
+	if mySession ~= activeCollectSession then return false end
 	if player.Character ~= char then return false end
 
 	local tempPos = hrp.CFrame
-	setNoclipOwner("AutoCollect", true)
+	cleanupState.lastTempPos = tempPos -- Guardado para resguardo del limpiador global
+	setNoclipOwner("AutoCollect_" .. mySession, true)
 	
-	local success, err = pcall(function()
+	local success = pcall(function()
 		hrp.CFrame = collectorPosition
 		hrp.Velocity = Vector3.new(0, -10, 0)
-	end)
-	
-	if not success then
-		setNoclipOwner("AutoCollect", false)
-		return false
-	end
 
-	local elapsed = 0
-	while elapsed < 0.8 do
-		if not autoCollectActive or token ~= activeCollectSession or respawnToken ~= cleanupState.respawnToken or player.Character ~= char or not hrp.Parent then
-			setNoclipOwner("AutoCollect", false)
-			return false
+		local elapsed = 0
+		while elapsed < 0.8 do
+			-- Verificación estricta por sesión en cada milisegundo de espera
+			if not autoCollectActive or mySession ~= activeCollectSession or player.Character ~= char or not hrp.Parent then
+				error("Session interrupted")
+			end
+			task.wait(0.1)
+			elapsed = elapsed + 0.1
 		end
-		task.wait(0.1)
-		elapsed = elapsed + 0.1
-	end
+	end)
 
-	local curChar = player.Character
-	local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-	if curChar == char and curHrp and curHrp.Parent and token == activeCollectSession and respawnToken == cleanupState.respawnToken then
-		pcall(function()
+	-- Retorno atómico garantizado: exige que la sesión siga siendo exactamente la misma que inició el teletransporte
+	pcall(function()
+		local curChar = player.Character
+		local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
+		if curChar == char and curHrp and curHrp.Parent and mySession == activeCollectSession then
 			curHrp.CFrame = tempPos
-		end)
-	end
+		end
+	end)
 
-	setNoclipOwner("AutoCollect", false)
-	return true
+	setNoclipOwner("AutoCollect_" .. mySession, false)
+	if cleanupState.lastTempPos == tempPos then
+		cleanupState.lastTempPos = nil
+	end
+	return success
 end
 
 local function collectMoneyRoutine()
 	activeCollectSession = activeCollectSession + 1
 	local mySession = activeCollectSession
-	local myRespawnToken = cleanupState.respawnToken
 
 	while autoCollectActive and mySession == activeCollectSession do
-		if myRespawnToken ~= cleanupState.respawnToken then
-			myRespawnToken = cleanupState.respawnToken
-		end
-
-		local success, err = pcall(function()
-			performCollect(mySession, myRespawnToken)
+		pcall(function()
+			performCollect(mySession)
 		end)
-
-		if not success then
-			setNoclipOwner("AutoCollect", false)
-		end
 
 		local waitElapsed = 0
 		while waitElapsed < 3 do
@@ -578,7 +584,7 @@ local function collectMoneyRoutine()
 			waitElapsed = waitElapsed + 0.2
 		end
 	end
-	setNoclipOwner("AutoCollect", false)
+	setNoclipOwner("AutoCollect_" .. mySession, false)
 end
 
 local function setAutoCollectState(state)
@@ -595,21 +601,24 @@ local function setAutoCollectState(state)
 	if autoSaveConfigActive then saveConfig(true) end
 end
 
-registerConnection(player.CharacterAdded:Connect(function(newChar)
+local function setupCharacter(char)
 	cleanupState.respawnToken = cleanupState.respawnToken + 1
 	local myRespawnToken = cleanupState.respawnToken
 
-	task.wait(0.5)
-	if myRespawnToken ~= cleanupState.respawnToken or player.Character ~= newChar or not newChar.Parent then
+	task.wait(0.2)
+	if myRespawnToken ~= cleanupState.respawnToken or player.Character ~= char or not char.Parent then
 		return
 	end
 
-	local hum = newChar:FindFirstChildOfClass("Humanoid")
+	local hum = char:FindFirstChildOfClass("Humanoid")
 	if hum then
 		if hum:GetAttribute("OriginalWalkSpeed") == nil then
 			hum:SetAttribute("OriginalWalkSpeed", hum.WalkSpeed)
 		end
-		hum.WalkSpeed = walkSpeedValue
+		-- Aplicamos la velocidad configurada solo si difiere del estándar o si el usuario la ajustó
+		if walkSpeedValue ~= 16 then
+			hum.WalkSpeed = walkSpeedValue
+		end
 	end
 
 	if mainNoclipActive then toggleMainNoclip(true) end
@@ -621,10 +630,17 @@ registerConnection(player.CharacterAdded:Connect(function(newChar)
 		activeCollectSession = activeCollectSession + 1
 		task.spawn(collectMoneyRoutine)
 	end
-end))
+end
+
+if player.Character then
+	setupCharacter(player.Character)
+end
+
+registerConnection(player.CharacterAdded:Connect(setupCharacter))
 
 registerConnection(player.CharacterRemoving:Connect(function(oldChar)
 	setNoclipOwner("AutoCollect", false)
+	restoreCharacterStates(oldChar)
 end))
 
 local function toggleInfJump(state)
@@ -651,22 +667,52 @@ local function toggleInfJump(state)
 end
 
 -- =====================================================================
--- 5. GUI RESPONSIVA PARA MÓVIL Y VIEWPORT DINÁMICO (UI-01 A UI-03)
+-- 5. INTERFAZ GRÁFICA Y CÁMARA DINÁMICA
 -- =====================================================================
-local camera = workspace.CurrentCamera
-local viewportSize = camera.ViewportSize
-local uiWidth = math.clamp(viewportSize.X * 0.9, 280, 480)
-local uiHeight = math.clamp(viewportSize.Y * 0.65, 260, 320)
+local function updateViewportMetrics()
+	local cam = getCurrentCamera()
+	local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
+	local w = math.clamp(vp.X * 0.9, 220, 480)
+	local h = math.clamp(vp.Y * 0.65, 200, 320)
+	return w, h
+end
+
+local initW, initH = updateViewportMetrics()
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "Mega Hub Universal De Tycoons (by jacoboeu8)"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
+mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, initW, 0, initH)
+mainFrame.Position = UDim2.new(0.5, -initW/2, 0.4, -initH/2)
+mainFrame.BackgroundColor3 = themes.Cyan.Main
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 8)
+mainCorner.Parent = mainFrame
+
+registerConnection(RunService.RenderStepped:Connect(function()
+	local cam = getCurrentCamera()
+	if cam then
+		local newW, newH = updateViewportMetrics()
+		if mainFrame and mainFrame.Parent and (mainFrame.AbsoluteSize.X ~= newW or mainFrame.AbsoluteSize.Y ~= newH) then
+			mainFrame.Size = UDim2.new(0, newW, 0, newH)
+		end
+	end
+end))
+
 local function showTopNotification(text)
 	local notifLabel = Instance.new("TextLabel")
-	notifLabel.Size = UDim2.new(0, 280, 0, 32)
-	notifLabel.Position = UDim2.new(0.5, -140, 0.05, 0)
+	notifLabel.Size = UDim2.new(0, 260, 0, 32)
+	notifLabel.Position = UDim2.new(0.5, -130, 0.05, 0)
 	notifLabel.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
 	notifLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 	notifLabel.Font = Enum.Font.SourceSansBold
@@ -686,8 +732,8 @@ end
 local function showRightNotification(text, isJoin)
 	if not joinLeaveNotifsActive then return end
 	local notifLabel = Instance.new("TextLabel")
-	notifLabel.Size = UDim2.new(0, 190, 0, 28)
-	notifLabel.Position = UDim2.new(1, -200, 0.45, 0)
+	notifLabel.Size = UDim2.new(0, 180, 0, 28)
+	notifLabel.Position = UDim2.new(1, -190, 0.45, 0)
 	notifLabel.BackgroundColor3 = isJoin and Color3.fromRGB(40, 180, 60) or Color3.fromRGB(200, 50, 50)
 	notifLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 	notifLabel.Font = Enum.Font.SourceSansBold
@@ -720,7 +766,7 @@ registerConnection(Players.PlayerRemoving:Connect(function(p)
 end))
 
 -- =====================================================================
--- 6. MÓDULO ESP DESACOPLADO Y AISLADO (ESP-01 A ESP-04)
+-- 6. MÓDULO ESP AISLADO CON PURGA DE CONEXIONES OPTIMIZADA
 -- =====================================================================
 local function applyESP(targetPlayer)
 	if targetPlayer == player then return end
@@ -731,6 +777,7 @@ local function applyESP(targetPlayer)
 		if not espActive or not char or char:FindFirstChild("ESPHighlight") then return end
 		local highlight = Instance.new("Highlight")
 		highlight.Name = "ESPHighlight"
+		highlight:SetAttribute("HubOwner", "MegaHub")
 		highlight.Adornee = char
 		highlight.FillColor = Color3.fromRGB(0, 150, 255)
 		highlight.FillTransparency = 0.3
@@ -754,7 +801,8 @@ end
 
 local function removeESP(targetPlayer)
 	if targetPlayer.Character and targetPlayer.Character:FindFirstChild("ESPHighlight") then
-		targetPlayer.Character.ESPHighlight:Destroy()
+		local h = targetPlayer.Character.ESPHighlight
+		if h:GetAttribute("HubOwner") == "MegaHub" then h:Destroy() end
 	end
 	cleanPlayerChamsConns(targetPlayer.UserId)
 end
@@ -781,6 +829,7 @@ local function applyNameESP(targetPlayer)
 
 		local bb = Instance.new("BillboardGui")
 		bb.Name = "ESPNameTag"
+		bb:SetAttribute("HubOwner", "MegaHub")
 		bb.Adornee = head
 		bb.Size = UDim2.new(0, 150, 0, 30)
 		bb.StudsOffset = Vector3.new(0, 2.5, 0)
@@ -813,7 +862,8 @@ end
 
 local function removeNameESP(targetPlayer)
 	if targetPlayer.Character and targetPlayer.Character:FindFirstChild("ESPNameTag") then
-		targetPlayer.Character.ESPNameTag:Destroy()
+		local t = targetPlayer.Character.ESPNameTag
+		if t:GetAttribute("HubOwner") == "MegaHub" then t:Destroy() end
 	end
 	cleanPlayerNamesConns(targetPlayer.UserId)
 end
@@ -851,7 +901,7 @@ local function toggleTracersState(state)
 end
 
 registerConnection(RunService.RenderStepped:Connect(function()
-	local curCamera = workspace.CurrentCamera
+	local curCamera = getCurrentCamera()
 	local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 
 	if espNameActive then
@@ -860,7 +910,7 @@ registerConnection(RunService.RenderStepped:Connect(function()
 			if p ~= player and p.Character then
 				local tag = p.Character:FindFirstChild("ESPNameTag")
 				local hrpTarget = p.Character:FindFirstChild("HumanoidRootPart")
-				if tag and tag:FindFirstChild("Label") and hrpTarget and curHrp then
+				if tag and tag:GetAttribute("HubOwner") == "MegaHub" and tag:FindFirstChild("Label") and hrpTarget and curHrp then
 					local dist = math.floor((curHrp.Position - hrpTarget.Position).Magnitude)
 					tag.Label.Text = p.Name .. " [" .. dist .. "m]"
 				end
@@ -907,28 +957,8 @@ registerConnection(RunService.RenderStepped:Connect(function()
 end))
 
 -- =====================================================================
--- 7. INTERFAZ GRÁFICA PRINCIPAL Y WIDGET DE ESTADÍSTICAS INDEPENDIENTE
+-- 7. INTERFAZ GRÁFICA Y WIDGETS
 -- =====================================================================
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 0, 0, 0)
-mainFrame.Position = UDim2.new(0.5, 0, 0.4, 0)
-mainFrame.BackgroundColor3 = themes.Cyan.Main
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.ClipsDescendants = true
-mainFrame.Parent = screenGui
-
-local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0, 8)
-mainCorner.Parent = mainFrame
-
-TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-	Size = UDim2.new(0, uiWidth, 0, uiHeight),
-	Position = UDim2.new(0.5, -uiWidth/2, 0.4, -uiHeight/2)
-}):Play()
-
 local topBar = Instance.new("Frame")
 topBar.Name = "TopBar"
 topBar.Size = UDim2.new(1, 0, 0, 32)
@@ -1045,7 +1075,7 @@ settingsTab.ScrollBarThickness = 4
 settingsTab.Visible = false
 settingsTab.Parent = contentFrame
 
--- MENÚ Y WIDGET INDEPENDIENTE DE RENDIMIENTO
+-- MENÚ Y WIDGET DE RENDIMIENTO
 local profileCard = Instance.new("Frame")
 profileCard.Size = UDim2.new(0.95, 0, 0, 55)
 profileCard.Position = UDim2.new(0, 0, 0, 5)
@@ -1548,7 +1578,7 @@ registerConnection(collectButton.MouseButton1Click:Connect(function()
 	setAutoCollectState(not autoCollectActive)
 end))
 
--- CONFIGURACIÓN Y PERSISTENCIA (V3.9.2)
+-- CONFIGURACIÓN Y PERSISTENCIA (V4.4)
 local function createSettingsBtn(text, posY, color)
 	local btn = Instance.new("TextButton")
 	btn.Size = UDim2.new(0.95, 0, 0, 24)
@@ -1664,6 +1694,7 @@ saveConfig = function(isSilent)
 		return false
 	end
 	local data = {
+		PlaceId = game.PlaceId,
 		Lang = currentLang, Theme = currentThemeName, WalkSpeed = walkSpeedValue, FlySpeed = flySpeedValue,
 		Noclip = mainNoclipActive, Fullbright = fullbrightActive, Fly = flyActive, InfJump = infJumpActive,
 		ESPChams = espActive, ESPName = espNameActive, ESPTracers = espTracersActive, AutoCollect = autoCollectActive,
@@ -1731,23 +1762,26 @@ loadConfig = function()
 		flySpeedBox.Text = tostring(flySpeedValue)
 	end
 
-	if type(data.BasePos) == "table" and #data.BasePos == 12 then
-		local valid = true
-		for _, v in ipairs(data.BasePos) do
-			if type(v) ~= "number" or v ~= v or math.abs(v) == math.huge then valid = false break end
+	local isSamePlace = (data.PlaceId == game.PlaceId)
+	if isSamePlace then
+		if type(data.BasePos) == "table" and #data.BasePos == 12 then
+			local valid = true
+			for _, v in ipairs(data.BasePos) do
+				if type(v) ~= "number" or v ~= v or math.abs(v) == math.huge then valid = false break end
+			end
+			if valid then
+				pcall(function() basePosition = CFrame.new(safeUnpack(data.BasePos)) end)
+			end
 		end
-		if valid then
-			pcall(function() basePosition = CFrame.new(safeUnpack(data.BasePos)) end)
-		end
-	end
 
-	if type(data.CollectorPos) == "table" and #data.CollectorPos == 12 then
-		local valid = true
-		for _, v in ipairs(data.CollectorPos) do
-			if type(v) ~= "number" or v ~= v or math.abs(v) == math.huge then valid = false break end
-		end
-		if valid then
-			pcall(function() collectorPosition = CFrame.new(safeUnpack(data.CollectorPos)) end)
+		if type(data.CollectorPos) == "table" and #data.CollectorPos == 12 then
+			local valid = true
+			for _, v in ipairs(data.CollectorPos) do
+				if type(v) ~= "number" or v ~= v or math.abs(v) == math.huge then valid = false break end
+			end
+			if valid then
+				pcall(function() collectorPosition = CFrame.new(safeUnpack(data.CollectorPos)) end)
+			end
 		end
 	end
 
@@ -1810,7 +1844,7 @@ loadConfig = function()
 		autoLoadBtn.BackgroundColor3 = autoLoadConfigActive and Color3.fromRGB(40, 200, 40) or Color3.fromRGB(200, 40, 40)
 	end
 
-	if type(data.AutoCollect) == "boolean" then
+	if isSamePlace and type(data.AutoCollect) == "boolean" then
 		if data.AutoCollect and collectorPosition then
 			setAutoCollectState(true)
 		else
@@ -1852,7 +1886,6 @@ registerConnection(toggleButton.MouseButton1Click:Connect(function()
 	toggleButton.Visible = false
 end))
 
--- AUTO-CARGA AL INICIAR SEGURA
 task.spawn(function()
 	if envFS.hasRead and envFS.hasIsFile then
 		local fileExists = false
